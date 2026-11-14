@@ -1,0 +1,245 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional, url format)
+    //   - role: string (required, ['admin', 'user'])
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: shipments
+    // Document ID: {shipmentId}
+    // Fields:
+    //   - trackingNumber: string (required)
+    //   - origin: string (required)
+    //   - destination: string (required)
+    //   - status: string (required, ['In Transit', 'Delivered', 'Pending', 'Delayed'])
+    //   - direction: string (required, ['Inbound', 'Outbound'])
+    //   - estimatedArrival: string (optional)
+    //   - value: number (optional)
+    //   - weight: string (optional)
+    //   - createdBy: string (required)
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: vehicles
+    // Document ID: {vehicleId}
+    // Fields:
+    //   - id: string (required)
+    //   - type: string (required, ['Truck', 'Van', 'Ship', 'Plane'])
+    //   - status: string (required, ['Active', 'Maintenance', 'Idle'])
+    //   - location: string (optional)
+    //   - fuelLevel: number (optional)
+    //   - driver: string (required)
+    //   - lat: number (required)
+    //   - lng: number (required)
+    //   - createdBy: string (required)
+    //   - createdAt: timestamp (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "interactivemarketingja@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['admin', 'user'] &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || isValidUrl(data.photoURL));
+    }
+
+    function isValidShipment(data) {
+      let requiredFields = ['trackingNumber', 'origin', 'destination', 'status', 'direction', 'createdBy', 'customer'];
+      let optionalFields = ['estimatedArrival', 'value', 'weight', 'createdAt', 'type', 'priority', 'originLat', 'originLng', 'destLat', 'destLng', 'updatedAt', 'cargoType', 'specialHandling'];
+      let allFields = requiredFields.concat(optionalFields);
+      
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allFields) &&
+             data.trackingNumber is string && data.trackingNumber.size() < 50 &&
+             data.origin is string && data.origin.size() < 200 &&
+             data.destination is string && data.destination.size() < 200 &&
+             data.customer is string && data.customer.size() < 100 &&
+             data.status in ['In Transit', 'Delivered', 'Pending', 'Delayed'] &&
+             data.direction in ['Inbound', 'Outbound'] &&
+             data.createdBy is string &&
+             (!('weight' in data) || (data.weight is string && data.weight.size() < 20)) &&
+             (!('type' in data) || (data.type is string && data.type.size() < 50)) &&
+             (!('priority' in data) || (data.priority is string && data.priority.size() < 50)) &&
+             (!('originLat' in data) || data.originLat is number) &&
+             (!('originLng' in data) || data.originLng is number) &&
+             (!('destLat' in data) || data.destLat is number) &&
+             (!('destLng' in data) || data.destLng is number) &&
+             (!('cargoType' in data) || (data.cargoType is string && data.cargoType.size() < 100)) &&
+             (!('specialHandling' in data) || (data.specialHandling is string && data.specialHandling.size() < 1000));
+    }
+
+    function isValidVehicle(data) {
+      let requiredFields = ['id', 'type', 'status', 'driver', 'lat', 'lng', 'createdBy'];
+      let optionalFields = ['speed', 'altitude', 'odometer', 'temperature', 'fuelLevel', 'location', 'weightCapacity', 'volumeCapacity', 'createdAt', 'updatedAt'];
+      let allFields = requiredFields.concat(optionalFields);
+
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allFields) &&
+             data.id is string &&
+             data.type in ['Truck', 'Van', 'Ship', 'Plane'] &&
+             data.status in ['Active', 'Maintenance', 'Idle'] &&
+             data.driver is string && data.driver.size() < 100 &&
+             data.lat is number && data.lng is number &&
+             data.createdBy is string &&
+             (!('speed' in data) || data.speed is number) &&
+             (!('altitude' in data) || data.altitude is number) &&
+             (!('odometer' in data) || data.odometer is number) &&
+             (!('temperature' in data) || data.temperature is number) &&
+             (!('fuelLevel' in data) || data.fuelLevel is number) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 200)) &&
+             (!('weightCapacity' in data) || (data.weightCapacity is string && data.weightCapacity.size() < 50)) &&
+             (!('volumeCapacity' in data) || (data.volumeCapacity is string && data.volumeCapacity.size() < 50));
+    }
+
+    function isValidMaintenance(data) {
+      let requiredFields = ['vehicleId', 'date', 'time', 'serviceType', 'status', 'createdBy'];
+      let optionalFields = ['notes', 'createdAt', 'updatedAt'];
+      let allFields = requiredFields.concat(optionalFields);
+
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allFields) &&
+             data.vehicleId is string &&
+             data.date is string &&
+             data.time is string &&
+             data.serviceType in ['Routine', 'Repair', 'Inspection', 'Oil Change', 'Tire Rotation'] &&
+             data.status in ['Scheduled', 'Completed', 'Cancelled'] &&
+             data.createdBy is string &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 500));
+    }
+
+    function isValidInventoryItem(data) {
+      let requiredFields = ['sku', 'name', 'quantity', 'status', 'createdBy'];
+      let optionalFields = ['id', 'category', 'minStock', 'location', 'value', 'createdAt', 'updatedAt'];
+      let allFields = requiredFields.concat(optionalFields);
+
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allFields) &&
+             data.sku is string && data.sku.size() < 50 &&
+             data.name is string && data.name.size() < 200 &&
+             data.quantity is number && data.quantity >= 0 &&
+             data.status in ['In Stock', 'Low Stock', 'Out of Stock'] &&
+             data.createdBy is string &&
+             (!('category' in data) || (data.category is string && data.category.size() < 100)) &&
+             (!('minStock' in data) || (data.minStock is number && data.minStock >= 0)) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 200)) &&
+             (!('value' in data) || (data.value is number && data.value >= 0));
+    }
+
+    function isValidOrder(data) {
+      let requiredFields = ['orderNumber', 'customerName', 'items', 'totalAmount', 'status', 'createdBy'];
+      let optionalFields = ['id', 'customerEmail', 'shippingAddress', 'createdAt', 'updatedAt', 'shipmentId'];
+      let allFields = requiredFields.concat(optionalFields);
+
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allFields) &&
+             data.orderNumber is string && data.orderNumber.size() < 50 &&
+             data.customerName is string && data.customerName.size() < 100 &&
+             data.items is list && data.items.size() > 0 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.status in ['Pending', 'Processing', 'Fulfilled', 'Cancelled'] &&
+             data.createdBy is string &&
+             (!('customerEmail' in data) || (data.customerEmail is string && isValidEmail(data.customerEmail))) &&
+             (!('shippingAddress' in data) || (data.shippingAddress is string && data.shippingAddress.size() < 1000)) &&
+             (!('shipmentId' in data) || (data.shipmentId is string));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    (isOwner(userId) && request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /shipments/{shipmentId} {
+      allow read: if isAuthenticated() || (request.query.limit == 1);
+      allow create: if isAuthenticated() && isValidShipment(request.resource.data) && 
+                    request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && isValidShipment(request.resource.data) && 
+                    (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
+    match /vehicles/{vehicleId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVehicle(request.resource.data) && 
+                    request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && isValidVehicle(request.resource.data) && 
+                    (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
+    match /maintenance/{maintenanceId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMaintenance(request.resource.data) && 
+                    request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && isValidMaintenance(request.resource.data) && 
+                    (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidInventoryItem(request.resource.data) && 
+                    request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && isValidInventoryItem(request.resource.data) && 
+                    (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidOrder(request.resource.data) && 
+                    request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && isValidOrder(request.resource.data) && 
+                    (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+  }
+}
